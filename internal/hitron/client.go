@@ -171,6 +171,20 @@ type DocsisWan struct {
 	CmIPAddress   string `json:"CmIpAddress"`
 }
 
+// LinkStatus is /data/getLinkStatus.asp: the state of the modem's LAN-side
+// Ethernet port.
+type LinkStatus struct {
+	Status string `json:"LinkStatus"`
+	Duplex string `json:"LinkDuplex"`
+	Speed  string `json:"LinkSpeed"`
+}
+
+// Up reports whether the LAN port has Ethernet link.
+func (l LinkStatus) Up() bool { return strings.EqualFold(strings.TrimSpace(l.Status), "up") }
+
+// FullDuplex reports whether the link negotiated full duplex.
+func (l LinkStatus) FullDuplex() bool { return strings.EqualFold(strings.TrimSpace(l.Duplex), "full") }
+
 // Status is a full snapshot of the modem.
 type Status struct {
 	SysInfo        SysInfo
@@ -181,6 +195,10 @@ type Status struct {
 	UpstreamOFDM   []USOFDMChannel
 	CMInit         CMInit
 	DocsisWan      DocsisWan
+
+	// Link is nil when /data/getLinkStatus.asp could not be read. It is best-effort,
+	// like Model: a firmware without it must not turn the scrape into up=0.
+	Link *LinkStatus
 
 	// OFDMErr records a failure to read the OFDM endpoints. It does not fail the
 	// scrape (see Fetch); callers surface it as absent OFDM series.
@@ -274,6 +292,10 @@ func (c *Client) Fetch(ctx context.Context) (*Status, error) {
 		_ = json.Unmarshal(body, &s.Model)
 	}
 
+	if l, lErr := getOne[LinkStatus](ctx, c, "/data/getLinkStatus.asp"); lErr == nil {
+		s.Link = &l
+	}
+
 	return &s, nil
 }
 
@@ -303,6 +325,26 @@ func ParseUptime(s string) (time.Duration, error) {
 		time.Duration(atoi(m[3]))*time.Minute +
 		time.Duration(atoi(m[4]))*time.Second
 	return d, nil
+}
+
+var linkSpeedRe = regexp.MustCompile(`(?i)^\s*(\d+(?:\.\d+)?)\s*([mg])bps\s*$`)
+
+// ParseLinkSpeed converts a Hitron link speed string such as "1000Mbps" or
+// "2.5Gbps" to bits per second. An unrecognized value returns an error so the
+// caller omits the metric rather than reporting a wrong speed.
+func ParseLinkSpeed(s string) (float64, error) {
+	m := linkSpeedRe.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("unrecognized link speed %q", s)
+	}
+	v, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, err
+	}
+	if strings.EqualFold(m[2], "g") {
+		return v * 1e9, nil
+	}
+	return v * 1e6, nil
 }
 
 // parseFloat is tolerant of the empty/placeholder values the firmware emits.

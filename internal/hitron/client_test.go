@@ -48,6 +48,26 @@ func TestParseUptimeRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestParseLinkSpeed(t *testing.T) {
+	t.Parallel()
+	ok := map[string]float64{
+		"1000Mbps": 1e9, "100Mbps": 1e8, "10Mbps": 1e7, "2500Mbps": 2.5e9,
+		"2.5Gbps": 2.5e9, " 1000 Mbps ": 1e9, "1gbps": 1e9,
+	}
+	for in, want := range ok {
+		got, err := ParseLinkSpeed(in)
+		if err != nil || got != want {
+			t.Errorf("ParseLinkSpeed(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	// Must error, not return 0 — a fake zero speed would read as a dead link.
+	for _, in := range []string{"", "--", "TODO", "fast", "1000", "Mbps"} {
+		if v, err := ParseLinkSpeed(in); err == nil {
+			t.Errorf("ParseLinkSpeed(%q) = %v, want error", in, v)
+		}
+	}
+}
+
 func TestParseFloat(t *testing.T) {
 	t.Parallel()
 	ok := map[string]float64{"38.983": 38.983, "-1.100": -1.1, "0": 0, "46.760": 46.76}

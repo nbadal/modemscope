@@ -138,6 +138,7 @@ modem runs a small embedded server that does not tolerate concurrency:
 | `/data/getCMInit.asp` | `CMInit` (DOCSIS registration state machine) | yes |
 | `/data/getCmDocsisWan.asp` | `DocsisWan` (config name, CM IP) | yes |
 | `/data/system_model.asp` | `Model` (model/vendor name) | best-effort |
+| `/data/getLinkStatus.asp` | `LinkStatus` (LAN port link state, speed, duplex) | best-effort |
 
 Interface characteristics baked into the client:
 

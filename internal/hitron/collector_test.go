@@ -23,6 +23,12 @@ func quietLogger() *slog.Logger {
 // "rebooting" (500s) mid-test.
 func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 	t.Helper()
+	return modemServerWith(t, healthy, nil)
+}
+
+// modemServerWith is modemServer with per-path response bodies replaced by overrides.
+func modemServerWith(t *testing.T, healthy *atomic.Bool, overrides map[string]string) *httptest.Server {
+	t.Helper()
 	bodies := map[string]string{
 		"/data/getSysInfo.asp":     `[{"hwVersion":"1A","swVersion":"7.3.5.3.2b1","serialNumber":"AN0000000000","rfMac":"00:11:22:33:44:55","wanIp":"TODO","systemUptime":"00h:05m:00s","systemTime":"Tue Jul 14, 2026, 20:20:28"}]`,
 		"/data/dsinfo.asp":         `[{"portId":"1","channelId":"20","frequency":"561000000","modulation":"2","signalStrength":"-1.100","snr":"38.983","dsoctets":"19840672","correcteds":"3","uncorrect":"7"}]`,
@@ -32,6 +38,9 @@ func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 		"/data/dsofdminfo.asp":     `[{"receive":"0","ffttype":"NA","Subcarr0freqFreq":"NA","plclock":"NO","ncplock":"NO","mdc1lock":"NO","plcpower":"NA","SNR":"NA","dsoctets":"NA","correcteds":"NA","uncorrect":"NA"},{"receive":"1","ffttype":"4K","Subcarr0freqFreq":" 713600000","plclock":"YES","ncplock":"YES","mdc1lock":"YES","plcpower":"-5.200001","SNR":"38","dsoctets":"3211241","correcteds":"3206076","uncorrect":"1432"}]`,
 		"/data/usofdminfo.asp":     `[{"uschindex":"0","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
 		"/data/system_model.asp":   `{"modelName":"CODA","vendorname":"HITRON"}`,
+	}
+	for path, body := range overrides {
+		bodies[path] = body
 	}
 	mux := http.NewServeMux()
 	for path, body := range bodies {
@@ -385,4 +394,73 @@ func mustGauge(t *testing.T, reg *prometheus.Registry, name string) prometheus.C
 	}
 	t.Fatalf("%s not found", name)
 	return nil
+}
+
+// The LAN link state, verbatim from a Hitron CODA-57 (sw 7.3.5.3.3b2): note the
+// stray spaces inside the array, which the JSON decoder must tolerate.
+func TestCollectLinkStatus(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/getLinkStatus.asp": `[ {"LinkStatus": "Up", "LinkDuplex":"Full","LinkSpeed":"1000Mbps"} ]`,
+	})
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(newTestCollector(t, srv.URL)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	expected := `
+# HELP modemscope_lan_link_up 1 if the modem's LAN port has Ethernet link. Absent if the modem does not report link status.
+# TYPE modemscope_lan_link_up gauge
+modemscope_lan_link_up 1
+# HELP modemscope_lan_link_speed_bits_per_second Negotiated speed of the modem's LAN port. A link below the service tier caps throughput.
+# TYPE modemscope_lan_link_speed_bits_per_second gauge
+modemscope_lan_link_speed_bits_per_second 1e+09
+# HELP modemscope_lan_link_full_duplex 1 if the LAN link negotiated full duplex. 0 on an up link usually means a bad cable or port.
+# TYPE modemscope_lan_link_full_duplex gauge
+modemscope_lan_link_full_duplex 1
+`
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"modemscope_lan_link_up", "modemscope_lan_link_speed_bits_per_second",
+		"modemscope_lan_link_full_duplex"); err != nil {
+		t.Error(err)
+	}
+}
+
+// A link that is down publishes up=0 and no duplex (meaningless without link).
+func TestCollectLinkDown(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/getLinkStatus.asp": `[{"LinkStatus":"Down","LinkDuplex":"--","LinkSpeed":"--"}]`,
+	})
+	c := newTestCollector(t, srv.URL)
+	if n := testutil.CollectAndCount(c, "modemscope_lan_link_up"); n != 1 {
+		t.Errorf("lan_link_up series = %d, want 1", n)
+	}
+	for _, name := range []string{"modemscope_lan_link_speed_bits_per_second", "modemscope_lan_link_full_duplex"} {
+		if n := testutil.CollectAndCount(c, name); n != 0 {
+			t.Errorf("%s published %d series for a down link; must be absent", name, n)
+		}
+	}
+}
+
+// getLinkStatus is best-effort: a modem or firmware without it must still scrape
+// up=1, with the link series simply absent rather than reported as 0.
+func TestLinkStatusIsBestEffort(t *testing.T) {
+	t.Parallel()
+	srv := modemServer(t, nil) // the default fixture has no getLinkStatus endpoint
+	c := newTestCollector(t, srv.URL)
+	if n := testutil.CollectAndCount(c, "modemscope_lan_link_up", "modemscope_lan_link_speed_bits_per_second",
+		"modemscope_lan_link_full_duplex"); n != 0 {
+		t.Errorf("link series published without an endpoint: %d", n)
+	}
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(c); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(`
+# HELP modemscope_up 1 if the modem status endpoints were scraped successfully.
+# TYPE modemscope_up gauge
+modemscope_up 1
+`), "modemscope_up"); err != nil {
+		t.Error(err)
+	}
 }

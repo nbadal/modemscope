@@ -65,6 +65,10 @@ type Collector struct {
 	usOFDMFreq      *prometheus.Desc
 	usOFDMPower     *prometheus.Desc
 	usOFDMChannelBw *prometheus.Desc
+
+	linkUp         *prometheus.Desc
+	linkSpeed      *prometheus.Desc
+	linkFullDuplex *prometheus.Desc
 }
 
 // NewCollector returns a Collector reading from client.
@@ -167,6 +171,16 @@ func NewCollector(client *Client, log *slog.Logger, budget time.Duration) *Colle
 			"Upstream OFDMA reported transmit power (dBmV).", []string{"channel"}, nil),
 		usOFDMChannelBw: prometheus.NewDesc(namespace+"_upstream_ofdma_bandwidth_hz",
 			"Upstream OFDMA channel bandwidth (Hz).", []string{"channel"}, nil),
+
+		linkUp: prometheus.NewDesc(namespace+"_lan_link_up",
+			"1 if the modem's LAN port has Ethernet link. Absent if the modem does not report link status.",
+			nil, nil),
+		linkSpeed: prometheus.NewDesc(namespace+"_lan_link_speed_bits_per_second",
+			"Negotiated speed of the modem's LAN port. A link below the service tier caps throughput.",
+			nil, nil),
+		linkFullDuplex: prometheus.NewDesc(namespace+"_lan_link_full_duplex",
+			"1 if the LAN link negotiated full duplex. 0 on an up link usually means a bad cable or port.",
+			nil, nil),
 	}
 }
 
@@ -184,6 +198,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 		c.dsSNR, c.dsPower, c.dsFreq, c.dsOctets, c.dsCorrected, c.dsUncorrect, c.dsChannels,
 		c.usPower, c.usFreq, c.usBandwidth, c.usChannels,
 		c.initState, c.networkAcces,
+		c.linkUp, c.linkSpeed, c.linkFullDuplex,
 		c.ofdmLocked, c.ofdmLockState, c.ofdmSNR, c.ofdmPower, c.ofdmFreq,
 		c.ofdmOctets, c.ofdmCorrected, c.ofdmUncorrect,
 		c.usOFDMEnabled, c.usOFDMFreq, c.usOFDMPower, c.usOFDMChannelBw,
@@ -298,6 +313,18 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 	ch <- prometheus.MustNewConstMetric(c.networkAcces, prometheus.GaugeValue,
 		boolToFloat(isSuccess(status.CMInit.NetworkAccess)))
+
+	// Best-effort: absent entirely when the modem didn't answer, never a fake 0.
+	if l := status.Link; l != nil {
+		ch <- prometheus.MustNewConstMetric(c.linkUp, prometheus.GaugeValue, boolToFloat(l.Up()))
+		if bps, err := ParseLinkSpeed(l.Speed); err == nil {
+			ch <- prometheus.MustNewConstMetric(c.linkSpeed, prometheus.GaugeValue, bps)
+		}
+		// Duplex is only meaningful while the link is up.
+		if l.Up() {
+			ch <- prometheus.MustNewConstMetric(c.linkFullDuplex, prometheus.GaugeValue, boolToFloat(l.FullDuplex()))
+		}
+	}
 }
 
 // fetch reads the modem, coalescing concurrent scrapes onto one request set.

@@ -66,6 +66,9 @@ tell you which channel is degrading before it takes the line down.
 | `modemscope_downstream_ofdm_lock` | gauge | `receiver,stage` | Per-stage OFDM lock (`plc`, `ncp`, `mdc1`). `plc=1` with `ncp=0`/`mdc1=0` is a partial lock: values look real but counters freeze, so `rate()` misreads it as a clean carrier. |
 | `modemscope_docsis_init_state` | gauge | `stage` | 1 = healthy. Stages: `hw_init`, `find_downstream`, `ranging`, `dhcp`, `time_of_day`, `download_cfg`, `registration`, `bpi`, `traffic`. |
 | `modemscope_network_access` | gauge | — | 1 if the CMTS permits the modem on the network. |
+| `modemscope_lan_link_up` | gauge | — | 1 if the modem's LAN port has Ethernet link. Absent if the modem doesn't report it. |
+| `modemscope_lan_link_speed_bits_per_second` | gauge | — | Negotiated LAN link speed. A link below your service tier caps throughput. |
+| `modemscope_lan_link_full_duplex` | gauge | — | 1 if the LAN link is full duplex (only while the link is up). 0 usually means a bad cable or port. |
 | `modemscope_scrape_duration_seconds` | gauge | — | Scrape latency (~0.2s typical). |
 
 The counters **reset on reboot**, so always use `rate()` / `increase()` —
