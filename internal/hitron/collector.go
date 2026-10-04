@@ -3,6 +3,7 @@ package hitron
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +47,8 @@ type Collector struct {
 	dsCorrected  *prometheus.Desc
 	dsUncorrect  *prometheus.Desc
 	dsChannels   *prometheus.Desc
+	dsModulation *prometheus.Desc
+	usModulation *prometheus.Desc
 	usPower      *prometheus.Desc
 	usFreq       *prometheus.Desc
 	usBandwidth  *prometheus.Desc
@@ -112,6 +115,16 @@ func NewCollector(client *Client, log *slog.Logger, budget time.Duration) *Colle
 			dsLabels, nil),
 		dsChannels: prometheus.NewDesc(namespace+"_downstream_channels",
 			"Number of bonded downstream channels. A drop means channels fell off.", nil, nil),
+
+		// Info-style: always 1, the value is in the labels. A channel stepping down to a
+		// lower modulation shows up as its series changing label, which is one of the
+		// earliest signs of an impairment.
+		dsModulation: prometheus.NewDesc(namespace+"_downstream_modulation_info",
+			"Downstream channel modulation. Always 1. Codes outside the modem's known table are shown raw.",
+			[]string{"channel", "port", "modulation"}, nil),
+		usModulation: prometheus.NewDesc(namespace+"_upstream_modulation_info",
+			"Upstream channel modulation and DOCSIS mode. Always 1.",
+			[]string{"channel", "port", "modulation", "mode"}, nil),
 
 		usPower: prometheus.NewDesc(namespace+"_upstream_power_dbmv",
 			"Upstream transmit power (dBmV). Healthy range is roughly 35..51; sustained highs mean the modem is straining.",
@@ -182,6 +195,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range []*prometheus.Desc{
 		c.up, c.scrapeDuration, c.info, c.uptime,
 		c.dsSNR, c.dsPower, c.dsFreq, c.dsOctets, c.dsCorrected, c.dsUncorrect, c.dsChannels,
+		c.dsModulation, c.usModulation,
 		c.usPower, c.usFreq, c.usBandwidth, c.usChannels,
 		c.initState, c.networkAcces,
 		c.ofdmLocked, c.ofdmLockState, c.ofdmSNR, c.ofdmPower, c.ofdmFreq,
@@ -232,6 +246,10 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		emit(ch, c.dsOctets, prometheus.CounterValue, dc.DSOctets, lbl)
 		emit(ch, c.dsCorrected, prometheus.CounterValue, dc.Correcteds, lbl)
 		emit(ch, c.dsUncorrect, prometheus.CounterValue, dc.Uncorrect, lbl)
+		if m := ModulationName(dc.Modulation); m != "" {
+			ch <- prometheus.MustNewConstMetric(c.dsModulation, prometheus.GaugeValue, 1,
+				dc.ChannelID, dc.PortID, m)
+		}
 	}
 
 	ch <- prometheus.MustNewConstMetric(c.usChannels, prometheus.GaugeValue, float64(len(status.Upstream)))
@@ -240,6 +258,10 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		emit(ch, c.usPower, prometheus.GaugeValue, uc.SignalStrength, lbl)
 		emit(ch, c.usFreq, prometheus.GaugeValue, uc.Frequency, lbl)
 		emit(ch, c.usBandwidth, prometheus.GaugeValue, uc.Bandwidth, lbl)
+		if m := strings.TrimSpace(uc.ModType); m != "" {
+			ch <- prometheus.MustNewConstMetric(c.usModulation, prometheus.GaugeValue, 1,
+				uc.ChannelID, uc.PortID, m, strings.TrimSpace(uc.SCDMAMode))
+		}
 	}
 
 	for _, oc := range status.DownstreamOFDM {

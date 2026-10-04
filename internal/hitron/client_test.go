@@ -81,6 +81,21 @@ func TestIsSuccess(t *testing.T) {
 	}
 }
 
+func TestModulationName(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		// The modem's own UI table; code 2 is the one observed on live channels.
+		"0": "16QAM", "1": "64QAM", "2": "256QAM", "3": "1024QAM",
+		"4": "32QAM", "5": "128QAM", "6": "QPSK",
+		" 2 ": "256QAM",    // padding is trimmed
+		"9":   "9", "": "", // anything else passes through unchanged
+	} {
+		if got := ModulationName(in); got != want {
+			t.Errorf("ModulationName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // fakeModem serves the exact payload shapes captured from the CODA-56.
 func fakeModem(t *testing.T) *httptest.Server {
 	t.Helper()

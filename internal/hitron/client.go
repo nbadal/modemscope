@@ -323,6 +323,32 @@ func parseFloat(s string) (float64, bool) {
 	return f, true
 }
 
+// downstreamModulations maps the numeric dsinfo.asp "modulation" code to its name,
+// as the modem's own web UI translates it (observed on a Hitron CODA-57, sw
+// 7.3.5.3.3b2). Only code 2 (256QAM) has been seen live; the rest come from the
+// UI's lookup table. Codes outside it are passed through unchanged by
+// ModulationName, where the UI would print "Unknown".
+var downstreamModulations = map[string]string{
+	"0": "16QAM",
+	"1": "64QAM",
+	"2": "256QAM",
+	"3": "1024QAM",
+	"4": "32QAM",
+	"5": "128QAM",
+	"6": "QPSK",
+}
+
+// ModulationName returns the name for a downstream modulation code, or the raw
+// code when it is not in the table, so an unknown value is visible rather than
+// mislabelled. An empty code returns "".
+func ModulationName(code string) string {
+	code = strings.TrimSpace(code)
+	if name, ok := downstreamModulations[code]; ok {
+		return name
+	}
+	return code
+}
+
 // isSuccess reports whether a DOCSIS init stage reads as healthy.
 func isSuccess(v string) bool {
 	lower := strings.ToLower(strings.TrimSpace(v))

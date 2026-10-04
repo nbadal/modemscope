@@ -23,6 +23,12 @@ func quietLogger() *slog.Logger {
 // "rebooting" (500s) mid-test.
 func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 	t.Helper()
+	return modemServerWith(t, healthy, nil)
+}
+
+// modemServerWith is modemServer with per-path response bodies replaced by overrides.
+func modemServerWith(t *testing.T, healthy *atomic.Bool, overrides map[string]string) *httptest.Server {
+	t.Helper()
 	bodies := map[string]string{
 		"/data/getSysInfo.asp":     `[{"hwVersion":"1A","swVersion":"7.3.5.3.2b1","serialNumber":"AN0000000000","rfMac":"00:11:22:33:44:55","wanIp":"TODO","systemUptime":"00h:05m:00s","systemTime":"Tue Jul 14, 2026, 20:20:28"}]`,
 		"/data/dsinfo.asp":         `[{"portId":"1","channelId":"20","frequency":"561000000","modulation":"2","signalStrength":"-1.100","snr":"38.983","dsoctets":"19840672","correcteds":"3","uncorrect":"7"}]`,
@@ -32,6 +38,9 @@ func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 		"/data/dsofdminfo.asp":     `[{"receive":"0","ffttype":"NA","Subcarr0freqFreq":"NA","plclock":"NO","ncplock":"NO","mdc1lock":"NO","plcpower":"NA","SNR":"NA","dsoctets":"NA","correcteds":"NA","uncorrect":"NA"},{"receive":"1","ffttype":"4K","Subcarr0freqFreq":" 713600000","plclock":"YES","ncplock":"YES","mdc1lock":"YES","plcpower":"-5.200001","SNR":"38","dsoctets":"3211241","correcteds":"3206076","uncorrect":"1432"}]`,
 		"/data/usofdminfo.asp":     `[{"uschindex":"0","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
 		"/data/system_model.asp":   `{"modelName":"CODA","vendorname":"HITRON"}`,
+	}
+	for path, body := range overrides {
+		bodies[path] = body
 	}
 	mux := http.NewServeMux()
 	for path, body := range bodies {
@@ -244,6 +253,58 @@ func TestErrorCountersAreCounters(t *testing.T) {
 		} else if got != typ {
 			t.Errorf("%s is %s, want %s", name, got, typ)
 		}
+	}
+}
+
+// Channel payloads verbatim from a Hitron CODA-57 (sw 7.3.5.3.3b2): downstream
+// modulation code "2" is 256QAM (as the modem's own UI shows), and its upstream
+// channels are 64QAM ATDMA on 6.4 MHz.
+func TestCollectModulation(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/dsinfo.asp": `[{"portId":"1","frequency":"567000000","modulation":"2","signalStrength":"-8.400","snr":"33.957","dsoctets":"3213127671","correcteds":"35","uncorrect":"0","channelId":"2"},{"portId":"2","frequency":"573000000","modulation":"2","signalStrength":"-8.200","snr":"33.957","dsoctets":"3213118867","correcteds":"28","uncorrect":"0","channelId":"3"}]`,
+		"/data/usinfo.asp": `[{"portId":"1","frequency":"30400000","bandwidth":"6400000","modtype":"64QAM","scdmaMode":"ATDMA","signalStrength":"53.521","channelId":"1"},{"portId":"2","frequency":"36800000","bandwidth":"6400000","modtype":"64QAM","scdmaMode":"ATDMA","signalStrength":"54.771","channelId":"2"}]`,
+	})
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(newTestCollector(t, srv.URL)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	expected := `
+# HELP modemscope_downstream_modulation_info Downstream channel modulation. Always 1. Codes outside the modem's known table are shown raw.
+# TYPE modemscope_downstream_modulation_info gauge
+modemscope_downstream_modulation_info{channel="2",modulation="256QAM",port="1"} 1
+modemscope_downstream_modulation_info{channel="3",modulation="256QAM",port="2"} 1
+# HELP modemscope_upstream_modulation_info Upstream channel modulation and DOCSIS mode. Always 1.
+# TYPE modemscope_upstream_modulation_info gauge
+modemscope_upstream_modulation_info{channel="1",mode="ATDMA",modulation="64QAM",port="1"} 1
+modemscope_upstream_modulation_info{channel="2",mode="ATDMA",modulation="64QAM",port="2"} 1
+`
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"modemscope_downstream_modulation_info", "modemscope_upstream_modulation_info"); err != nil {
+		t.Error(err)
+	}
+}
+
+// A downstream code outside the table is shown raw rather than guessed at, so a
+// modem reporting a different code is visible instead of silently mislabelled.
+func TestCollectModulationUnknownCodeShownRaw(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/dsinfo.asp": `[{"portId":"1","channelId":"20","frequency":"561000000","modulation":"9","signalStrength":"-1.100","snr":"38.983","dsoctets":"1","correcteds":"0","uncorrect":"0"},{"portId":"2","channelId":"21","frequency":"567000000","modulation":"","signalStrength":"-1.100","snr":"38.983","dsoctets":"1","correcteds":"0","uncorrect":"0"}]`,
+	})
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(newTestCollector(t, srv.URL)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// An empty code publishes no series at all.
+	expected := `
+# HELP modemscope_downstream_modulation_info Downstream channel modulation. Always 1. Codes outside the modem's known table are shown raw.
+# TYPE modemscope_downstream_modulation_info gauge
+modemscope_downstream_modulation_info{channel="20",modulation="9",port="1"} 1
+`
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"modemscope_downstream_modulation_info"); err != nil {
+		t.Error(err)
 	}
 }
 

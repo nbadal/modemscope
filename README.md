@@ -51,9 +51,11 @@ tell you which channel is degrading before it takes the line down.
 | `modemscope_downstream_octets_total` | counter | `channel,port` | Downstream octets. |
 | `modemscope_downstream_frequency_hz` | gauge | `channel,port` | Channel centre frequency. |
 | `modemscope_downstream_channels` | gauge | — | Bonded downstream channel count. A drop = channels fell off. |
+| `modemscope_downstream_modulation_info` | gauge | `channel,port,modulation` | Always 1; the modulation is the label (the modem's numeric code is translated: `0` 16QAM, `1` 64QAM, `2` 256QAM, `3` 1024QAM, `4` 32QAM, `5` 128QAM, `6` QPSK; anything else is shown raw). A channel stepping down to a lower modulation is an early sign of trouble. |
 | `modemscope_upstream_power_dbmv` | gauge | `channel,port` | Upstream transmit power. Healthy ≈ 35..51 dBmV. |
 | `modemscope_upstream_frequency_hz` / `..._bandwidth_hz` | gauge | `channel,port` | Upstream channel shape. |
 | `modemscope_upstream_channels` | gauge | — | Bonded upstream channel count. |
+| `modemscope_upstream_modulation_info` | gauge | `channel,port,modulation,mode` | Always 1; modulation (e.g. `64QAM`) and DOCSIS mode (e.g. `ATDMA`) as labels. |
 | `modemscope_downstream_ofdm_locked` | gauge | `receiver` | 1 if the OFDM receiver holds all three locks (PLC, NCP, MDC1). |
 | `modemscope_downstream_ofdm_snr_db` | gauge | `receiver` | DOCSIS 3.1 OFDM SNR. |
 | `modemscope_downstream_ofdm_plc_power_dbmv` | gauge | `receiver` | OFDM PLC received power. |
