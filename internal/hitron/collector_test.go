@@ -231,7 +231,7 @@ func TestCollectOFDMAEnabled(t *testing.T) {
 # HELP modemscope_upstream_ofdma_bandwidth_hz Upstream OFDMA channel bandwidth (Hz).
 # TYPE modemscope_upstream_ofdma_bandwidth_hz gauge
 modemscope_upstream_ofdma_bandwidth_hz{channel="0"} 1.6e+07
-# HELP modemscope_upstream_ofdma_frequency_hz Upstream OFDMA start frequency (Hz): the low edge of the channel, not its centre.
+# HELP modemscope_upstream_ofdma_frequency_hz Upstream OFDMA subcarrier-0 frequency (Hz): the low edge of the channel, not its centre.
 # TYPE modemscope_upstream_ofdma_frequency_hz gauge
 modemscope_upstream_ofdma_frequency_hz{channel="0"} 4.6e+06
 # HELP modemscope_upstream_ofdma_enabled 1 if this upstream OFDMA channel is enabled. Commonly 0 on Comcast; not a fault.

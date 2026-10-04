@@ -162,7 +162,7 @@ func NewCollector(client *Client, log *slog.Logger, budget time.Duration) *Colle
 			"1 if this upstream OFDMA channel is enabled. Commonly 0 on Comcast; not a fault.",
 			[]string{"channel"}, nil),
 		usOFDMFreq: prometheus.NewDesc(namespace+"_upstream_ofdma_frequency_hz",
-			"Upstream OFDMA start frequency (Hz): the low edge of the channel, not its centre.", []string{"channel"}, nil),
+			"Upstream OFDMA subcarrier-0 frequency (Hz): the low edge of the channel, not its centre.", []string{"channel"}, nil),
 		usOFDMPower: prometheus.NewDesc(namespace+"_upstream_ofdma_power_dbmv",
 			"Upstream OFDMA reported transmit power (dBmV).", []string{"channel"}, nil),
 		usOFDMChannelBw: prometheus.NewDesc(namespace+"_upstream_ofdma_bandwidth_hz",
