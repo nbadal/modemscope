@@ -64,6 +64,7 @@ type Collector struct {
 	usOFDMEnabled   *prometheus.Desc
 	usOFDMFreq      *prometheus.Desc
 	usOFDMPower     *prometheus.Desc
+	usOFDMPower16   *prometheus.Desc
 	usOFDMChannelBw *prometheus.Desc
 }
 
@@ -164,7 +165,12 @@ func NewCollector(client *Client, log *slog.Logger, budget time.Duration) *Colle
 		usOFDMFreq: prometheus.NewDesc(namespace+"_upstream_ofdma_frequency_hz",
 			"Upstream OFDMA centre frequency (Hz).", []string{"channel"}, nil),
 		usOFDMPower: prometheus.NewDesc(namespace+"_upstream_ofdma_power_dbmv",
-			"Upstream OFDMA reported transmit power (dBmV).", []string{"channel"}, nil),
+			"Upstream OFDMA reported transmit power (dBmV), total over the whole channel bandwidth.",
+			[]string{"channel"}, nil),
+		usOFDMPower16: prometheus.NewDesc(namespace+"_upstream_ofdma_power_1_6mhz_dbmv",
+			"Upstream OFDMA transmit power normalised to 1.6 MHz (dBmV). Unlike the total, this does not "+
+				"grow with channel width, so it is the figure to compare against the QAM channels' power.",
+			[]string{"channel"}, nil),
 		usOFDMChannelBw: prometheus.NewDesc(namespace+"_upstream_ofdma_bandwidth_hz",
 			"Upstream OFDMA channel bandwidth (Hz).", []string{"channel"}, nil),
 	}
@@ -186,7 +192,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 		c.initState, c.networkAcces,
 		c.ofdmLocked, c.ofdmLockState, c.ofdmSNR, c.ofdmPower, c.ofdmFreq,
 		c.ofdmOctets, c.ofdmCorrected, c.ofdmUncorrect,
-		c.usOFDMEnabled, c.usOFDMFreq, c.usOFDMPower, c.usOFDMChannelBw,
+		c.usOFDMEnabled, c.usOFDMFreq, c.usOFDMPower, c.usOFDMPower16, c.usOFDMChannelBw,
 	} {
 		ch <- d
 	}
@@ -277,6 +283,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		if !uo.Enabled() {
 			continue
 		}
+		emit(ch, c.usOFDMPower16, prometheus.GaugeValue, uo.RepPower1_6, lbl)
 		emit(ch, c.usOFDMFreq, prometheus.GaugeValue, uo.Frequency, lbl)
 		emit(ch, c.usOFDMPower, prometheus.GaugeValue, uo.RepPower, lbl)
 		emit(ch, c.usOFDMChannelBw, prometheus.GaugeValue, uo.ChannelBw, lbl)

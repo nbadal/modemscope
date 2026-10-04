@@ -131,6 +131,10 @@ type USOFDMChannel struct {
 	ChannelBw string `json:"channelBw"`
 	RepPower  string `json:"repPower"`
 	FFTVal    string `json:"fftVal"`
+
+	// RepPower1_6 is repPower normalised to 1.6 MHz, i.e. 10*log10(channelBw/1.6)
+	// lower than the whole-channel total.
+	RepPower1_6 string `json:"repPower1_6"`
 }
 
 // Enabled reports whether this OFDMA channel is in use. Comcast commonly leaves

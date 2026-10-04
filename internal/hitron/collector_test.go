@@ -23,6 +23,12 @@ func quietLogger() *slog.Logger {
 // "rebooting" (500s) mid-test.
 func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 	t.Helper()
+	return modemServerWith(t, healthy, nil)
+}
+
+// modemServerWith is modemServer with per-path response bodies replaced by overrides.
+func modemServerWith(t *testing.T, healthy *atomic.Bool, overrides map[string]string) *httptest.Server {
+	t.Helper()
 	bodies := map[string]string{
 		"/data/getSysInfo.asp":     `[{"hwVersion":"1A","swVersion":"7.3.5.3.2b1","serialNumber":"AN0000000000","rfMac":"00:11:22:33:44:55","wanIp":"TODO","systemUptime":"00h:05m:00s","systemTime":"Tue Jul 14, 2026, 20:20:28"}]`,
 		"/data/dsinfo.asp":         `[{"portId":"1","channelId":"20","frequency":"561000000","modulation":"2","signalStrength":"-1.100","snr":"38.983","dsoctets":"19840672","correcteds":"3","uncorrect":"7"}]`,
@@ -32,6 +38,9 @@ func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 		"/data/dsofdminfo.asp":     `[{"receive":"0","ffttype":"NA","Subcarr0freqFreq":"NA","plclock":"NO","ncplock":"NO","mdc1lock":"NO","plcpower":"NA","SNR":"NA","dsoctets":"NA","correcteds":"NA","uncorrect":"NA"},{"receive":"1","ffttype":"4K","Subcarr0freqFreq":" 713600000","plclock":"YES","ncplock":"YES","mdc1lock":"YES","plcpower":"-5.200001","SNR":"38","dsoctets":"3211241","correcteds":"3206076","uncorrect":"1432"}]`,
 		"/data/usofdminfo.asp":     `[{"uschindex":"0","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
 		"/data/system_model.asp":   `{"modelName":"CODA","vendorname":"HITRON"}`,
+	}
+	for path, body := range overrides {
+		bodies[path] = body
 	}
 	mux := http.NewServeMux()
 	for path, body := range bodies {
@@ -169,6 +178,33 @@ modemscope_upstream_ofdma_enabled{channel="0"} 0
 		if mf.GetName() == "modemscope_upstream_ofdma_power_dbmv" {
 			t.Error("upstream_ofdma_power_dbmv present for a DISABLED channel; must be absent")
 		}
+	}
+}
+
+// The OFDMA power fields, from an enabled channel on a Hitron CODA-57
+// (sw 7.3.5.3.3b2). repPower covers the whole 16 MHz channel; repPower1_6 is the
+// same power normalised to 1.6 MHz, exactly 10*log10(16/1.6) = 10 dB lower.
+func TestCollectOFDMAPower(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/usofdminfo.asp": `[{"uschindex":"0","state":"   OPERATE","frequency":"4600000","digAtten":"    0.2048","digAttenBo":"    8.6473","channelBw":"   16.0000","repPower":"   57.5000","repPower1_6":"   47.5000","fftVal":"2K"},{"uschindex":"1","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
+	})
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(newTestCollector(t, srv.URL)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// The disabled channel 1 must publish neither power: its 0.0000 would read as a dead radio.
+	expected := `
+# HELP modemscope_upstream_ofdma_power_dbmv Upstream OFDMA reported transmit power (dBmV), total over the whole channel bandwidth.
+# TYPE modemscope_upstream_ofdma_power_dbmv gauge
+modemscope_upstream_ofdma_power_dbmv{channel="0"} 57.5
+# HELP modemscope_upstream_ofdma_power_1_6mhz_dbmv Upstream OFDMA transmit power normalised to 1.6 MHz (dBmV). Unlike the total, this does not grow with channel width, so it is the figure to compare against the QAM channels' power.
+# TYPE modemscope_upstream_ofdma_power_1_6mhz_dbmv gauge
+modemscope_upstream_ofdma_power_1_6mhz_dbmv{channel="0"} 47.5
+`
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"modemscope_upstream_ofdma_power_dbmv", "modemscope_upstream_ofdma_power_1_6mhz_dbmv"); err != nil {
+		t.Error(err)
 	}
 }
 

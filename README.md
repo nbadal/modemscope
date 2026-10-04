@@ -63,6 +63,7 @@ tell you which channel is degrading before it takes the line down.
 | `modemscope_downstream_ofdm_subcarrier0_hz` | gauge | `receiver` | OFDM subcarrier-0 frequency. |
 | `modemscope_upstream_ofdma_enabled` | gauge | `channel` | 1 if upstream OFDMA is enabled (commonly 0 on Comcast; not a fault). |
 | `modemscope_upstream_ofdma_frequency_hz` / `..._power_dbmv` / `..._bandwidth_hz` | gauge | `channel` | Upstream OFDMA shape; absent when the channel is disabled. |
+| `modemscope_upstream_ofdma_power_1_6mhz_dbmv` | gauge | `channel` | Upstream OFDMA power normalised to 1.6 MHz, comparable to the QAM channels' power (`..._power_dbmv` is the total over the whole channel); absent when the channel is disabled. |
 | `modemscope_downstream_ofdm_lock` | gauge | `receiver,stage` | Per-stage OFDM lock (`plc`, `ncp`, `mdc1`). `plc=1` with `ncp=0`/`mdc1=0` is a partial lock: values look real but counters freeze, so `rate()` misreads it as a clean carrier. |
 | `modemscope_docsis_init_state` | gauge | `stage` | 1 = healthy. Stages: `hw_init`, `find_downstream`, `ranging`, `dhcp`, `time_of_day`, `download_cfg`, `registration`, `bpi`, `traffic`. |
 | `modemscope_network_access` | gauge | — | 1 if the CMTS permits the modem on the network. |
