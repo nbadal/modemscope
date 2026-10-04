@@ -128,7 +128,7 @@ type USOFDMChannel struct {
 	State     string `json:"state"`
 	Frequency string `json:"frequency"`
 	DigAtten  string `json:"digAtten"`
-	ChannelBw string `json:"channelBw"`
+	ChannelBw string `json:"channelBw"` // MHz, unlike USChannel.Bandwidth (Hz)
 	RepPower  string `json:"repPower"`
 	FFTVal    string `json:"fftVal"`
 }

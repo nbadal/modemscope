@@ -162,7 +162,7 @@ func NewCollector(client *Client, log *slog.Logger, budget time.Duration) *Colle
 			"1 if this upstream OFDMA channel is enabled. Commonly 0 on Comcast; not a fault.",
 			[]string{"channel"}, nil),
 		usOFDMFreq: prometheus.NewDesc(namespace+"_upstream_ofdma_frequency_hz",
-			"Upstream OFDMA centre frequency (Hz).", []string{"channel"}, nil),
+			"Upstream OFDMA start frequency (Hz): the low edge of the channel, not its centre.", []string{"channel"}, nil),
 		usOFDMPower: prometheus.NewDesc(namespace+"_upstream_ofdma_power_dbmv",
 			"Upstream OFDMA reported transmit power (dBmV).", []string{"channel"}, nil),
 		usOFDMChannelBw: prometheus.NewDesc(namespace+"_upstream_ofdma_bandwidth_hz",
@@ -279,7 +279,8 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 		emit(ch, c.usOFDMFreq, prometheus.GaugeValue, uo.Frequency, lbl)
 		emit(ch, c.usOFDMPower, prometheus.GaugeValue, uo.RepPower, lbl)
-		emit(ch, c.usOFDMChannelBw, prometheus.GaugeValue, uo.ChannelBw, lbl)
+		// channelBw is reported in MHz ("16.0000"), unlike the Hz-valued QAM bandwidth.
+		emitScaled(ch, c.usOFDMChannelBw, prometheus.GaugeValue, uo.ChannelBw, lbl, 1e6)
 	}
 
 	for stage, v := range map[string]string{
@@ -325,11 +326,17 @@ func (c *Collector) fetch(ctx context.Context) (*Status, error) {
 // emit skips the metric when the firmware gives a non-numeric placeholder,
 // rather than reporting a misleading zero.
 func emit(ch chan<- prometheus.Metric, d *prometheus.Desc, t prometheus.ValueType, raw string, labels []string) {
+	emitScaled(ch, d, t, raw, labels, 1)
+}
+
+// emitScaled is emit for values the firmware reports in a different unit than the
+// metric's, multiplying by scale (e.g. 1e6 for MHz -> Hz).
+func emitScaled(ch chan<- prometheus.Metric, d *prometheus.Desc, t prometheus.ValueType, raw string, labels []string, scale float64) {
 	v, ok := parseFloat(raw)
 	if !ok {
 		return
 	}
-	ch <- prometheus.MustNewConstMetric(d, t, v, labels...)
+	ch <- prometheus.MustNewConstMetric(d, t, v*scale, labels...)
 }
 
 func boolToFloat(b bool) float64 {

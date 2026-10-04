@@ -23,6 +23,12 @@ func quietLogger() *slog.Logger {
 // "rebooting" (500s) mid-test.
 func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 	t.Helper()
+	return modemServerWith(t, healthy, nil)
+}
+
+// modemServerWith is modemServer with per-path response bodies replaced by overrides.
+func modemServerWith(t *testing.T, healthy *atomic.Bool, overrides map[string]string) *httptest.Server {
+	t.Helper()
 	bodies := map[string]string{
 		"/data/getSysInfo.asp":     `[{"hwVersion":"1A","swVersion":"7.3.5.3.2b1","serialNumber":"AN0000000000","rfMac":"00:11:22:33:44:55","wanIp":"TODO","systemUptime":"00h:05m:00s","systemTime":"Tue Jul 14, 2026, 20:20:28"}]`,
 		"/data/dsinfo.asp":         `[{"portId":"1","channelId":"20","frequency":"561000000","modulation":"2","signalStrength":"-1.100","snr":"38.983","dsoctets":"19840672","correcteds":"3","uncorrect":"7"}]`,
@@ -32,6 +38,9 @@ func modemServer(t *testing.T, healthy *atomic.Bool) *httptest.Server {
 		"/data/dsofdminfo.asp":     `[{"receive":"0","ffttype":"NA","Subcarr0freqFreq":"NA","plclock":"NO","ncplock":"NO","mdc1lock":"NO","plcpower":"NA","SNR":"NA","dsoctets":"NA","correcteds":"NA","uncorrect":"NA"},{"receive":"1","ffttype":"4K","Subcarr0freqFreq":" 713600000","plclock":"YES","ncplock":"YES","mdc1lock":"YES","plcpower":"-5.200001","SNR":"38","dsoctets":"3211241","correcteds":"3206076","uncorrect":"1432"}]`,
 		"/data/usofdminfo.asp":     `[{"uschindex":"0","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
 		"/data/system_model.asp":   `{"modelName":"CODA","vendorname":"HITRON"}`,
+	}
+	for path, body := range overrides {
+		bodies[path] = body
 	}
 	mux := http.NewServeMux()
 	for path, body := range bodies {
@@ -201,6 +210,39 @@ func TestOFDMAEnabledRequiresRealFrequency(t *testing.T) {
 	}
 	if !(USOFDMChannel{State: "ACTIVE", Frequency: "35600000"}).Enabled() {
 		t.Error("Enabled() = false for a channel with a real frequency")
+	}
+}
+
+// An enabled OFDMA channel, verbatim from a Hitron CODA-57 (sw 7.3.5.3.3b2) on
+// Astound. The earlier fixtures only had a disabled channel, so the units of the
+// real values were never exercised: channelBw is in MHz ("16.0000"), not Hz, and
+// must be converted to match the _hz metric name; and frequency (4.6 MHz on a
+// 16 MHz-wide channel) is the channel's low edge, not its centre.
+func TestCollectOFDMAEnabled(t *testing.T) {
+	t.Parallel()
+	srv := modemServerWith(t, nil, map[string]string{
+		"/data/usofdminfo.asp": `[{"uschindex":"0","state":"   OPERATE","frequency":"4600000","digAtten":"    0.2048","digAttenBo":"    8.6473","channelBw":"   16.0000","repPower":"   57.5000","repPower1_6":"   47.5000","fftVal":"2K"},{"uschindex":"1","state":"  DISABLED","frequency":"0","digAtten":"    0.0000","digAttenBo":"    0.0000","channelBw":"    0.0000","repPower":"    0.0000","repPower1_6":"    0.0000","fftVal":"2K"}]`,
+	})
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(newTestCollector(t, srv.URL)); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	expected := `
+# HELP modemscope_upstream_ofdma_bandwidth_hz Upstream OFDMA channel bandwidth (Hz).
+# TYPE modemscope_upstream_ofdma_bandwidth_hz gauge
+modemscope_upstream_ofdma_bandwidth_hz{channel="0"} 1.6e+07
+# HELP modemscope_upstream_ofdma_frequency_hz Upstream OFDMA start frequency (Hz): the low edge of the channel, not its centre.
+# TYPE modemscope_upstream_ofdma_frequency_hz gauge
+modemscope_upstream_ofdma_frequency_hz{channel="0"} 4.6e+06
+# HELP modemscope_upstream_ofdma_enabled 1 if this upstream OFDMA channel is enabled. Commonly 0 on Comcast; not a fault.
+# TYPE modemscope_upstream_ofdma_enabled gauge
+modemscope_upstream_ofdma_enabled{channel="0"} 1
+modemscope_upstream_ofdma_enabled{channel="1"} 0
+`
+	if err := testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"modemscope_upstream_ofdma_bandwidth_hz", "modemscope_upstream_ofdma_frequency_hz",
+		"modemscope_upstream_ofdma_enabled"); err != nil {
+		t.Error(err)
 	}
 }
 
